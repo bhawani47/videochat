@@ -25,7 +25,6 @@ const PORT = process.env.PORT || 4000;
 const server = app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 const io = socketIo(server, { cors: { origin: '*' } });
 
-
 // Hugging Face API Configuration using the feature-extraction pipeline
 const HUGGINGFACE_API_URL = "https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/all-MiniLM-L6-v2";
 const HUGGINGFACE_API_KEY = process.env.HUGGINGFACE_API_KEY;
@@ -39,8 +38,7 @@ async function getEmbedding(text, retries = 3) {
   if (!text || text.trim() === "") {
     throw new Error("Text input for embedding is empty.");
   }
-  
-  // Send the text as is; the pipeline accepts a string directly.
+
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       const response = await fetch(HUGGINGFACE_API_URL, {
@@ -51,25 +49,23 @@ async function getEmbedding(text, retries = 3) {
         },
         body: JSON.stringify({ inputs: text }),
       });
-      
+
       const rawText = await response.text();
-      
-      // Attempt to parse the response as JSON
+
       try {
         const data = JSON.parse(rawText);
-        
-        // If the model is still loading, wait and retry
+
         if (response.status === 503) {
           console.log(`Model is still loading... Retrying in 10 seconds (${attempt}/${retries})`);
           await new Promise(resolve => setTimeout(resolve, 10000));
           continue;
         }
-        
+
         if (!data || data.error) {
           throw new Error(`Error from Hugging Face API: ${JSON.stringify(data)}`);
         }
-        
-        return data; // data should be the embedding vector
+
+        return data;
       } catch (jsonError) {
         throw new Error(`Unexpected response from Hugging Face API: ${rawText}`);
       }
@@ -85,22 +81,22 @@ async function getEmbedding(text, retries = 3) {
 // Store user interests in Pinecone
 app.post("/store-interests", async (req, res) => {
   const { sessionId, interests } = req.body;
-  
+
   if (!sessionId || !interests) {
     return res.status(400).json({ error: "Missing sessionId or interests" });
   }
-  
+
   try {
     const embedding = await getEmbedding(interests);
-    
+
     await index.upsert([
       {
-        id: sessionId, // Using sessionId (or any unique identifier) since there's no login info
+        id: sessionId,
         values: embedding,
         metadata: { interests },
       },
     ]);
-    
+
     res.status(200).json({ message: "Interests stored successfully" });
   } catch (error) {
     console.error("Error storing interests:", error);
@@ -111,6 +107,11 @@ app.post("/store-interests", async (req, res) => {
 // Find a match based on interests
 app.post('/find-match', async (req, res) => {
   const { userId, interests } = req.body;
+
+  if (!userId || !interests) {
+    return res.status(400).json({ error: "Missing userId or interests" });
+  }
+
   try {
     const embedding = await getEmbedding(interests);
     const results = await index.query({
@@ -121,26 +122,27 @@ app.post('/find-match', async (req, res) => {
     const matches = results.matches.filter(match => match.id !== userId);
     res.status(200).json({ matches });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error("Error finding match:", error);
+    res.status(500).json({ error: "Failed to find match" });
   }
 });
 
 // WebRTC signaling with Socket.IO
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
-  
+
   socket.on('offer', (data) => {
     socket.broadcast.emit('offer', data);
   });
-  
+
   socket.on('answer', (data) => {
     socket.broadcast.emit('answer', data);
   });
-  
+
   socket.on('candidate', (data) => {
     socket.broadcast.emit('candidate', data);
   });
-  
+
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
   });
