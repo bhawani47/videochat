@@ -158,6 +158,7 @@ app.post("/find-match", async (req, res) => {
     console.log("Pinecone results:", results);
 
     // Filter out self and include only matches that are online
+    console.log(`Onloine : ${onlineUsers}`)
     const onlineMatches = results.matches
       .filter((match) => {
         const isOnline = onlineUsers.has(match.metadata.userId);
